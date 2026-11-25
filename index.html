@@ -664,6 +664,7 @@ const bodies = [];      // {key,name,rU,pos,mesh,orbit,parent,GM,info,...}
 const B = {};           // быстрый доступ по ключу
 const hitMeshes = [];   // меши для клика (raycasting)
 const orbitLines = [];
+const markers = [];    // {b, el} — создаётся в addMarker()
 
 function makeOrbitLine(aU, e, color){
   const pts = []; const n = 180;
@@ -1720,16 +1721,8 @@ function nearestBody(){
 }
 
 /* ---------- маркеры объектов: видны издалека, всегда кликабельны ---------- */
-const markers = [];
 function initMarkers(){
-  for(const b of bodies){
-    const div = document.createElement('div');
-    div.className = 'marker';
-    div.innerHTML = '<span style="color:var(--accent)">◆</span> '+b.name;
-    div.addEventListener('click', ev=>{ ev.stopPropagation(); selectBody(b.key); });
-    document.body.appendChild(div);
-    markers.push({b, el:div});
-  }
+  for(const b of bodies) addMarker(b);
 }
 
 /* ---------- выбор объекта и панель информации ---------- */
