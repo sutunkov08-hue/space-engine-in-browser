@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  SPACE ENGINE — браузерный трёхмерный космический симулятор
+  Один самодостаточный файл: HTML + CSS + JS (Three.js c CDN).
+  Структура кода:
+    1. Константы и данные небесных тел
+    2. Рендеринг (сцена, камера, постэффекты)
+    3. Шейдеры и построение небесных тел
+    4. Физика (орбиты Кеплера, ньютоновская гравитация)
+    5. Корабль и автопилот
+    6. Ввод (клавиатура, мышь, тач)
+    7. HUD и интерфейс
+    8. Звук
+    9. Сохранение, загрузка, главный цикл
+  Управление и интерфейс — на русском языке. Запуск: открыть
+  файл двойным кликом в Chrome / Firefox / Edge (нужен интернет
+  только для загрузки Three.js с CDN).
+  ============================================================
+-->
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Space Engine — космический симулятор</title>
+<style>
+  /* ===================== ОБЩИЕ СТИЛИ ===================== */
+  :root{
+    --accent:#4fd2ff; --panel:rgba(8,14,26,.82); --panel-brd:rgba(90,180,255,.25);
+    --text:#cfe8ff; --dim:#7fa8c9;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{width:100%;height:100%;overflow:hidden;background:#000;color:var(--text);
+    font-family:'Segoe UI',Roboto,Arial,sans-serif;font-size:14px;user-select:none}
+  canvas#scene{display:block;position:fixed;inset:0;touch-action:none}
+
+  /* ===================== ВЕРХНЯЯ ПАНЕЛЬ ===================== */
+  #topbar{position:fixed;top:0;left:0;right:0;z-index:20;display:flex;flex-wrap:wrap;gap:6px 16px;
+    padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--panel-brd);
+    backdrop-filter:blur(6px);font-size:13px;align-items:center}
+  #topbar b{color:var(--accent);font-weight:600}
+  #topbar .grp{display:flex;gap:5px;align-items:center;white-space:nowrap}
+  #fps{color:var(--dim)}
+  #unit-switch{display:flex;border:1px solid var(--panel-brd);border-radius:4px;overflow:hidden}
+  #unit-switch button{background:transparent;border:none;color:var(--dim);padding:2px 8px;cursor:pointer;font-size:11px}
+  #unit-switch button.on{background:var(--accent);color:#001018;font-weight:700}
+
+  /* ===================== НИЖНЯЯ ПАНЕЛЬ ===================== */
+  #bottombar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;flex-wrap:wrap;gap:6px;
+    padding:8px 12px;background:var(--panel);border-top:1px solid var(--panel-brd);
+    backdrop-filter:blur(6px);justify-content:center}
+  #bottombar button{background:rgba(20,40,70,.7);border:1px solid var(--panel-brd);color:var(--text);
+    padding:6px 12px;border-radius:5px;cursor:pointer;font-size:12.5px;white-space:nowrap}
+  #bottombar button:hover{background:rgba(50,90,150,.8)}
+  #bottombar button.on{background:var(--accent);color:#001018;font-weight:700}
+
+  /* ===================== ПОДСКАЗКИ (H) ===================== */
+  #help{position:fixed;left:12px;bottom:56px;z-index:19;background:var(--panel);
+    border:1px solid var(--panel-brd);border-radius:8px;padding:10px 14px;font-size:12px;
+    line-height:1.6;max-width:300px;backdrop-filter:blur(6px)}
+  #help h4{color:var(--accent);margin-bottom:4px;font-size:12px}
+  #help kbd{background:#12365c;border:1px solid #2b5b8f;border-radius:3px;padding:0 5px;
+    color:#e8f4ff;font-size:11px;font-family:inherit}
+  #help.hidden{display:none}
+
+  /* ===================== ИНФО-ПАНЕЛЬ ОБЪЕКТА ===================== */
+  #infopanel{position:fixed;right:12px;top:64px;z-index:21;width:312px;max-width:calc(100vw - 24px);
+    background:var(--panel);border:1px solid var(--panel-brd);border-radius:10px;
+    padding:14px 16px;backdrop-filter:blur(8px);display:none;max-height:calc(100vh - 210px);overflow-y:auto}
+  #infopanel.open{display:block}
+  #infopanel h3{color:var(--accent);margin-bottom:2px;font-size:17px}
+  #infopanel .type{color:var(--dim);font-size:12px;margin-bottom:8px}
+  #infopanel table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:8px}
+  #infopanel td{padding:3px 0;border-bottom:1px solid rgba(80,140,200,.15)}
+  #infopanel td:first-child{color:var(--dim);width:45%}
+  #infopanel td:last-child{text-align:right}
+  #infopanel p{font-size:12px;line-height:1.5;color:#a8c8e4;margin-bottom:10px}
+  #infopanel .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  #infopanel button{background:rgba(30,60,100,.8);border:1px solid var(--panel-brd);color:var(--text);
+    padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px}
+  #infopanel button:hover{background:rgba(60,110,180,.9)}
+  #infopanel .close{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--dim);
+    font-size:18px;cursor:pointer;padding:0}
+  #infopanel label{font-size:12px;display:flex;gap:6px;align-items:center;cursor:pointer}
+
+  /* ===================== НАСТРОЙКИ ===================== */
+  #settings{position:fixed;left:12px;top:64px;z-index:21;width:290px;background:var(--panel);
+    border:1px solid var(--panel-brd);border-radius:10px;padding:14px 16px;backdrop-filter:blur(8px);display:none}
+  #settings.open{display:block}
+  #settings h3{color:var(--accent);font-size:15px;margin-bottom:10px}
+  #settings .row{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;font-size:13px}
+  #settings input[type=range]{width:120px;accent-color:var(--accent)}
+  #settings select{background:#0d2038;color:var(--text);border:1px solid var(--panel-brd);border-radius:4px;padding:2px 5px}
+  #settings input[type=checkbox]{accent-color:var(--accent)}
+  #settings button{background:#143a63;border:1px solid var(--panel-brd);color:var(--text);
+    padding:5px 10px;border-radius:5px;cursor:pointer}
+
+  /* ===================== КАРТА СИСТЕМЫ (M) ===================== */
+  #mapwrap{position:fixed;right:12px;bottom:56px;z-index:19;background:var(--panel);
+    border:1px solid var(--panel-brd);border-radius:10px;padding:8px;backdrop-filter:blur(6px);display:none}
+  #mapwrap.open{display:block}
+  #map{display:block;border-radius:6px;cursor:crosshair}
+  #mapwrap .cap{color:var(--dim);font-size:11px;text-align:center;margin-top:4px;cursor:pointer}
+
+  /* ===================== МАРКЕРЫ ОБЪЕКТОВ ===================== */
+  .marker{position:fixed;z-index:15;transform:translate(-50%,-50%);color:#bfe3ff;cursor:pointer;
+    padding:3px 8px;border-radius:4px;background:rgba(5,12,24,.45);border:1px solid transparent;
+    font-size:12px;white-space:nowrap;text-shadow:0 0 4px #000}
+  .marker:hover{border-color:var(--accent);background:rgba(20,50,90,.8)}
+  .marker.sel{border-color:var(--accent);color:#fff;box-shadow:0 0 8px rgba(80,200,255,.5)}
+
+  /* ===================== СОСТОЯНИЕ КОРАБЛЯ ===================== */
+  #shipstate{position:fixed;left:50%;transform:translateX(-50%);bottom:56px;z-index:19;
+    display:none;flex-direction:column;gap:4px;align-items:center}
+  #shipstate.open{display:flex}
+  #fuelwrap{width:200px;height:10px;border:1px solid var(--panel-brd);border-radius:5px;
+    overflow:hidden;background:#06101d}
+  #fuelbar{height:100%;width:100%;background:linear-gradient(90deg,#ffb347,#4fd2ff)}
+  #modelbl{font-size:12px;color:var(--dim)}
+  #aplbl{font-size:12px;color:#ffd479;display:none}
+
+  /* ===================== ТОСТЫ ===================== */
+  #toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:30;
+    background:rgba(10,25,45,.92);border:1px solid var(--panel-brd);color:#dff2ff;
+    padding:8px 18px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none}
+
+  /* ===================== ЭКРАН ЗАГРУЗКИ ===================== */
+  #loading{position:fixed;inset:0;z-index:100;background:radial-gradient(ellipse at 50% 30%,#0a1730 0%,#020509 70%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+    text-align:center;padding:20px;overflow:auto}
+  #loading h1{font-size:34px;color:#fff;letter-spacing:6px;font-weight:300}
+  #loading h1 span{color:var(--accent)}
+  #loading .sub{color:var(--dim);font-size:14px;max-width:560px;line-height:1.6}
+  #loadhelp{display:grid;grid-template-columns:auto auto;gap:4px 22px;font-size:13px;text-align:left;
+    background:rgba(10,22,40,.6);border:1px solid var(--panel-brd);border-radius:10px;padding:16px 24px}
+  #loadhelp kbd{background:#12365c;border:1px solid #2b5b8f;border-radius:3px;padding:0 6px;color:#e8f4ff;font-size:12px;font-family:inherit}
+  #loadhelp .k{color:var(--dim)}
+  #startbtn{margin-top:6px;background:linear-gradient(90deg,#1488cc,#4fd2ff);border:none;color:#001018;
+    font-size:17px;font-weight:700;padding:13px 44px;border-radius:26px;cursor:pointer;letter-spacing:1px}
+  #startbtn:hover{filter:brightness(1.15)}
+  #loadstatus{color:var(--dim);font-size:12px}
+
+  @media (max-width:760px){
+    #help{display:none}
+    #topbar{font-size:11px;gap:4px 10px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== РАЗМЕТКА ИНТЕРФЕЙСА ===================== -->
+<div id="topbar">
+  <div class="grp"><b>☀ Солнечная система</b></div>
+  <div class="grp">Скорость: <b id="hud-speed">0</b></div>
+  <div class="grp" id="unit-switch">
+    <button data-u="kms" class="on">км/с</button><button data-u="kmh">км/ч</button><button data-u="c">c</button>
+  </div>
+  <div class="grp">Высота: <b id="hud-alt">—</b></div>
+  <div class="grp">До объекта: <b id="hud-near">—</b></div>
+  <div class="grp">Дата: <b id="hud-time">—</b></div>
+  <div class="grp" id="hud-warp">×1</div>
+  <div class="grp" id="fps">FPS: —</div>
+</div>
+
+<div id="bottombar">
+  <button id="btn-stop">Стоп (X)</button>
+  <button id="btn-pause">Пауза (P)</button>
+  <button id="btn-slow">Т− (T)</button>
+  <button id="btn-fast">Т+ (Y)</button>
+  <button id="btn-now">Сейчас</button>
+  <button id="btn-orbits" class="on">Орбиты (O)</button>
+  <button id="btn-map">Карта (M)</button>
+  <button id="btn-help" class="on">Подсказки (H)</button>
+  <button id="btn-sound" class="on">Звук 🔊</button>
+  <button id="btn-fs">Во весь экран (F1)</button>
+  <button id="btn-settings">⚙ Настройки</button>
+  <button id="btn-reset">Сброс</button>
+</div>
+
+<div id="shipstate">
+  <div id="modelbl">Режим: Обычный (1 / 2 / 3)</div>
+  <div id="fuelwrap"><div id="fuelbar"></div></div>
+  <div id="aplbl">🛰 АВТОПИЛОТ — набор на орбиту… (любая тяга — отмена)</div>
+</div>
+
+<div id="help">
+  <h4>Управление</h4>
+  <kbd>W</kbd><kbd>S</kbd><kbd>A</kbd><kbd>D</kbd><kbd>R</kbd><kbd>F</kbd> — полёт, <kbd>Shift</kbd> — форсаж<br>
+  <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> — поворот, <kbd>Q</kbd><kbd>E</kbd> — крен<br>
+  Колесо мыши — тяга, ЛКМ — выбор объекта<br>
+  <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> — режимы полёта, <kbd>G</kbd> — автопилот<br>
+  <kbd>X</kbd> — стоп, <kbd>T</kbd>/<kbd>Y</kbd> — время, <kbd>P</kbd> — пауза<br>
+  <kbd>O</kbd> — орбиты, <kbd>M</kbd> — карта, <kbd>H</kbd> — подсказки, <kbd>F1</kbd> — экран
+</div>
+
+<div id="infopanel">
+  <button class="close" id="info-close">✕</button>
+  <h3 id="info-name">—</h3>
+  <div class="type" id="info-type">—</div>
+  <table id="info-table"></table>
+  <p id="info-desc"></p>
+  <div class="row">
+    <button id="info-fly">🚀 Автопилот</button>
+    <label id="info-orbit-row"><input type="checkbox" id="info-orbit" checked> Орбита этого тела</label>
+  </div>
+</div>
+
+<div id="settings">
+  <h3>⚙ Настройки</h3>
+  <div class="row"><span>Качество графики</span>
+    <select id="set-quality"><option value="low">Низкое</option><option value="med" selected>Среднее</option><option value="high">Высокое</option></select></div>
+  <div class="row"><span>Свечение (блум)</span><input type="checkbox" id="set-bloom" checked></div>
+  <div class="row"><span>Туманности</span><input type="checkbox" id="set-nebula" checked></div>
+  <div class="row"><span>Звёздное небо</span><input type="checkbox" id="set-stars" checked></div>
+  <div class="row"><span>Звук</span><input type="checkbox" id="set-sound" checked></div>
+  <div class="row"><span>Размер планет ×</span><input type="range" id="set-pscale" min="8" max="120" value="30"><span id="set-pscale-v">30</span></div>
+  <div class="row"><span>Гравитация (0 — выкл)</span><input type="range" id="set-grav" min="0" max="3" step="0.1" value="1"><span id="set-grav-v">1.0</span></div>
+  <div class="row"><span>Базовая тяга</span><span id="set-power">1.0×</span></div>
+  <div class="row" style="margin-top:12px">
+    <button id="set-save">Сохранить сейчас</button>
+  </div>
+</div>
+
+<div id="mapwrap"><canvas id="map" width="300" height="300"></canvas><div class="cap" id="mapcap">Карта системы — кликните объект (клик по подписи — увеличить)</div></div>
+<div id="toast"></div>
+
+<!-- ===================== ЭКРАН ЗАГРУЗКИ ===================== -->
+<div id="loading">
+  <h1>SPACE <span>ENGINE</span></h1>
+  <div class="sub">Трёхмерный симулятор Солнечной системы: реальные орбиты, ньютоновская гравитация,
+    процедурные планеты, пояс астероидов, кометы и полная свобода полёта. Всё считается прямо в вашем браузере.</div>
+  <div id="loadhelp">
+    <span class="k"><kbd>W</kbd><kbd>S</kbd><kbd>A</kbd><kbd>D</kbd></span><span>вперёд / назад / влево / вправо</span>
+    <span class="k"><kbd>R</kbd><kbd>F</kbd> или <kbd>Пробел</kbd>/<kbd>Ctrl</kbd></span><span>вверх / вниз</span>
+    <span class="k"><kbd>Стрелки</kbd>, <kbd>Q</kbd><kbd>E</kbd></span><span>тангаж, рыскание и крен</span>
+    <span class="k">Мышь (зажать) · колесо</span><span>осмотр · тяга двигателя</span>
+    <span class="k"><kbd>Shift</kbd> · <kbd>X</kbd></span><span>форсаж · погасить скорость</span>
+    <span class="k"><kbd>Y</kbd>/<kbd>T</kbd> · <kbd>P</kbd></span><span>ускорить/замедлить время · пауза</span>
+    <span class="k"><kbd>O</kbd> · <kbd>M</kbd> · <kbd>H</kbd> · <kbd>F1</kbd></span><span>орбиты · карта · подсказки · экран</span>
+    <span class="k"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span>обычный / кинетический (топливо) / свободный режим</span>
+    <span class="k">Клик по планете</span><span>информация и автопилот</span>
+  </div>
+  <button id="startbtn">▶ НАЧАТЬ ПОЛЁТ</button>
+  <div id="loadstatus">Загрузка движка…</div>
+</div>
+
+<!-- ===================== THREE.JS (CDN, без сборки) ===================== -->
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 1. КОНСТАНТЫ И ДАННЫЕ НЕБЕСНЫХ ТЕЛ
+   1 сц. единица = 1000 км; 1 а.е. = 149 600 ед. Реальные
+   относительные орбиты (a, e, T). Гравитация для корабля —
+   ньютоновская, GM пересчитан в игровые единицы, множитель —
+   в настройках.
+   ════════════════════════════════════════════════════════════ */
+const AU    = 149600;       // а.е. в сцен. единицах
+const C_KMS = 299792;       // скорость света, км/с (для HUD)
+const DAY   = 86400;        // секунд в сутках
+
+const PLANETS = [
+ {key:'mercury',name:'Меркурий',a:0.3871,e:0.2056,T:87.97, rKm:2440, rot:1407.6,phase:0.8,type:0,seed:3.1, sea:.5,  ice:1.2, ocean:0,craters:1,cLow:0x8a7a66,cHigh:0xc9b8a0,cOcean:0x000000,atmo:0,       mapC:0x9b8b76, temp:'−173…+427 °C',  massKg:'3,30·10²³', g:3.7,  desc:'Самая маленькая и быстрая планета. Без атмосферы, вся в кратерах — похожа на Луну. Перепад температур — самый суровый в системе.'},
+ {key:'venus',  name:'Венера',  a:0.7233,e:0.0068,T:224.7,  rKm:6052, rot:-5832.5,phase:2.1,type:2,seed:7.7, sea:.5,  ice:1.3, ocean:0,craters:0,cLow:0xd9b06a,cHigh:0xf2d99a,cOcean:0x000000,atmo:0xEED9A0,mapC:0xe0c078, temp:'+464 °C',       massKg:'4,87·10²⁴', g:8.9,  desc:'Планета-парник: плотная углекислотная атмосфера, серные облака и давление в 92 раза больше земного. Самая горячая планета.'},
+ {key:'earth',  name:'Земля',   a:1.0,   e:0.0167,T:365.25, rKm:6371, rot:23.93,  phase:0.0,type:3,seed:12.4,sea:0.52,ice:0.82,ocean:1,craters:0,cLow:0x2e7d32,cHigh:0x9c8f5a,cOcean:0x0c2f6e,atmo:0x5f9fff,mapC:0x3f8fbf, temp:'−89…+57 °C',    massKg:'5,97·10²⁴', g:9.8,  desc:'Единственный известный мир с жизнью. 71% поверхности — океан. Атмосфера даёт голубое небо и закаты, у полюсов пляшут северные сияния.'},
+ {key:'mars',   name:'Марс',    a:1.5237,e:0.0934,T:687,    rKm:3390, rot:24.62,  phase:3.6,type:0,seed:21.9,sea:.5,  ice:0.88,ocean:0,craters:1,cLow:0xb05a34,cHigh:0xe08d5a,cOcean:0x000000,atmo:0xffa070,mapC:0xc06a40, temp:'−143…+35 °C',   massKg:'6,42·10²³', g:3.7,  desc:'Красная планета: ржавая пыль, самый большой вулкан Олимп и каньон Долины Маринер. Полярные шапки из водяного и сухого льда.'},
+ {key:'jupiter',name:'Юпитер',  a:5.2026,e:0.0489,T:4332.6, rKm:69911,rot:9.93,   phase:1.4,type:1,seed:5.2, sea:.5,  ice:1.3, ocean:0,craters:0,cLow:0xc9a06a,cHigh:0xf0e0c0,cOcean:0x8a5a3a,atmo:0xE8C9A0,mapC:0xd0a870, temp:'−145 °C (верх)',massKg:'1,90·10²⁷', g:24.8, desc:'Газовый гигант-исполин: в 2,5 раза массивнее всех прочих планет вместе. Полосы облаков из аммиака и Большое Красное Пятно — шторм, живущий веками.'},
+ {key:'saturn', name:'Сатурн',  a:9.5549,e:0.0565,T:10759,  rKm:58232,rot:10.66,  phase:4.4,type:1,seed:9.6, sea:.5,  ice:1.3, ocean:0,craters:0,cLow:0xd8c088,cHigh:0xf5ead0,cOcean:0x9a7a4a,atmo:0xF0DCA8,rings:true,mapC:0xe0cc90, temp:'−178 °C (верх)',massKg:'5,68·10²⁶', g:10.4, desc:'Владелец самых эффектных колец из льда и камня: толщиной десятки метров, а шириной сотни тысяч километров. Плотность меньше воды.'},
+ {key:'uranus', name:'Уран',    a:19.218,e:0.0472,T:30687,  rKm:25362,rot:-17.24, phase:5.5,type:2,seed:15.3,sea:.5,  ice:1.25,ocean:0,craters:0,cLow:0x86c3c9,cHigh:0xbfeef2,cOcean:0x000000,atmo:0x9FE0E8,mapC:0x9ad8de, temp:'−224 °C',       massKg:'8,68·10²⁵', g:8.7,  desc:'Ледяной гигант, лежащий «на боку»: ось наклонена на 98°. Самая холодная планета. Цвет — от метана в атмосфере.'},
+ {key:'neptune',name:'Нептун',  a:30.110,e:0.0086,T:60190,  rKm:24622,rot:16.11,  phase:2.9,type:2,seed:27.8,sea:.5,  ice:1.28,ocean:0,craters:0,cLow:0x2a55c9,cHigh:0x6f9fe8,cOcean:0x000000,atmo:0x5F8FFF,mapC:0x4a6fd8, temp:'−214 °C',       massKg:'1,02·10²⁶', g:11.2, desc:'Самая далёкая планета. Ветра здесь достигают 2100 км/ч — рекорд системы. Открыта «на кончике пера» по расчётам, а не в телескоп.'},
+];
+/* Спутники: расстояния увеличены пропорционально планетам для наглядности */
+const MOONS = {
+ earth:[ {name:'Луна',  T:27.32, rKm:1737,color:0xb8b4ac, desc:'Единственный спутник Земли и единственный мир, посещённый людьми. Всегда смотрит на нас одной стороной.'}],
+ mars:[  {name:'Фобос', T:0.319, rKm:11,  color:0x8a7a6a, desc:'Крошка, летящая так низко, что через миллионы лет упадёт на Марс.'},
+         {name:'Деймос',T:1.263, rKm:6,   color:0x9a8a7a, desc:'Один из самых маленьких спутников планет; вероятно, астероид-перебежчик.'}],
+ jupiter:[{name:'Ио',      T:1.77, rKm:1822,color:0xd9c25a, desc:'Самый вулканически активный мир: сотни действующих вулканов из серы.'},
+         {name:'Европа',  T:3.55, rKm:1561,color:0xcfc4ae, desc:'Ледяная скорлупа, а под ней — океан жидкой воды. Главный кандидат на внеземную жизнь.'},
+         {name:'Ганимед', T:7.15, rKm:2634,color:0x9a9288, desc:'Крупнейший спутник системы — больше Меркурия. Имеет собственную магнитосферу.'},
+         {name:'Каллисто',T:16.69,rKm:2410,color:0x7a7268, desc:'Самая кратерированная поверхность в Солнечной системе — древняя и неизменная.'}],
+ saturn:[ {name:'Титан', T:15.95,rKm:2575,color:0xd8a94f, desc:'Единственный спутник с плотной атмосферой. Метановые дожди и реки.'}],
+ neptune:[{name:'Тритон',T:5.88, rKm:1353,color:0xbfd0d8, desc:'Летит навстречу вращению Нептуна — пойманный обитатель пояса Койпера. Ледяные гейзеры.'}],
+};
+const SUN_DESC = 'Жёлтый карлик спектрального класса G2V. 99,86 % массы всей системы. Каждую секунду превращает 4 млн тонн вещества в свет.';
+
+const WARPS = [0, 1, 60, 600, 3600, 43200, 86400, 604800, 2592000, 31536000]; // пауза … ×1 год/с
+
+/* Гравитационные параметры в игровых единицах (DMA: GM[км³/с²]/1000) */
+const GM = { sun: 274*Math.pow(696000,2)/1e6 };    // ≈ 1,33·10⁸ ед³/с²
+for(const p of PLANETS) GM[p.key] = p.g*p.rKm*p.rKm/1e6;
+
+function fmtPeriod(sec){
+  const d = sec/DAY;
+  if(d<1)   return (sec/3600).toFixed(1)+' ч';
+  if(d<800) return d.toFixed(1)+' сут';
+  return (d/365.25).toFixed(1)+' лет';
+}
+function orbVelKms(aAU, Td){
+  const aKm = aAU*1.496e8;
+  return (2*Math.PI*aKm/(Td*DAY)).toFixed(2);
+}
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 2. РЕНДЕРИНГ: сцена, камера, рендерер, постэффекты
+   ════════════════════════════════════════════════════════════ */
+const S = {                    // глобальное состояние симуляции
+  simTime:0, startEpoch:Date.now(),
+  warpIdx:1, paused:false,
+  planetScale:30, gravScale:1, power:1,
+  mode:'normal', fuel:100, lastThrust:0,
+  unit:'kms', orbits:true, sound:true, selected:null,
+  autopilotOn:false, quality:'med',
+};
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 2e9);
+scene.add(camera);
+const renderer = new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.domElement.id = 'scene';
+document.body.appendChild(renderer.domElement);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.95, 0.55, 0.6);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 3. ШЕЙДЕРЫ И ПОСТРОЕНИЕ НЕБЕСНЫХ ТЕЛ
+   ════════════════════════════════════════════════════════════ */
+/* Параметрический шум (value noise + fbm) — общий блок GLSL */
+const NOISE_GLSL = [
+'float hash13(vec3 p){ p=fract(p*0.1031); p+=dot(p,p.yzx+33.33); return fract((p.x+p.y)*p.z); }',
+'float vnoise(vec3 x){',
+'  vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);',
+'  return mix(mix(mix(hash13(i+vec3(0.,0.,0.)),hash13(i+vec3(1.,0.,0.)),f.x),',
+'                 mix(hash13(i+vec3(0.,1.,0.)),hash13(i+vec3(1.,1.,0.)),f.x),f.y),',
+'             mix(mix(hash13(i+vec3(0.,0.,1.)),hash13(i+vec3(1.,0.,1.)),f.x),',
+'                 mix(hash13(i+vec3(0.,1.,1.)),hash13(i+vec3(1.,1.,1.)),f.x),f.y),f.z);',
+'}',
+'float fbm(vec3 p){ float v=0.0,a=0.5; for(int i=0;i<6;i++){ v+=a*vnoise(p); p*=2.03; a*=0.5; } return v; }',
+].join('\n');
+
+/* Чанки логарифмического буфера глубины — обязательны в кастомных
+   шейдерах: рендерер работает с лог-глубиной (устойчивость к масштабам
+   от метров до световых лет) */
+const LOGV     = '#include <common>\n#include <logdepthbuf_pars_vertex>';
+const LOGVEND  = '#include <logdepthbuf_vertex>';
+const LOGF     = '#include <common>\n#include <logdepthbuf_pars_fragment>';
+const LOGFEND  = '#include <logdepthbuf_fragment>';
+
+const PLANET_VS = [
+'varying vec3 vObj; varying vec3 vWorld; varying vec3 vN;',
+LOGV,
+'void main(){',
+'  vObj = normalize(position);',
+'  vN = normalize(mat3(modelMatrix)*normal);',
+'  vec4 wp = modelMatrix*vec4(position,1.0);',
+'  vWorld = wp.xyz;',
+'  gl_Position = projectionMatrix*viewMatrix*wp;',
+LOGVEND,
+'}'].join('\n');
+
+const PLANET_FS = [
+'uniform float uSeed,uSea,uIce,uOcean,uCraters,uType,uTime;',
+'uniform vec3 uCLow,uCHigh,uCOcean;',
+'varying vec3 vObj; varying vec3 vWorld; varying vec3 vN;',
+NOISE_GLSL, LOGF,
+'void main(){', LOGFEND,
+'  vec3 p = vObj*2.4 + vec3(uSeed);',
+'  float h;',
+'  if(uType>2.5){                            /* Земля: континенты */',
+'    h = fbm(p)*0.75 + fbm(p*2.7+5.0)*0.25;',
+'  } else if(uType>0.5 && uType<1.5){        /* гиганты: широтные полосы */',
+'    h = 0.5 + 0.28*sin(vObj.y*30.0 + fbm(p*1.5)*5.0) + 0.25*(fbm(p*2.2)-0.5);',
+'  } else {                                  /* скалистые и ледяные */',
+'    h = fbm(p)*0.7 + fbm(p*3.1)*0.3;',
+'  }',
+'  vec3 col; float land = 1.0;',
+'  if(uOcean>0.5){                           /* океан + материки */',
+'    land = smoothstep(uSea-0.05, uSea+0.03, h);',
+'    col = mix(uCOcean, mix(uCLow,uCHigh,smoothstep(uSea,uSea+0.38,h)), land);',
+'  } else if(uType>0.5 && uType<1.5){        /* полосы и «пятно» */',
+'    col = mix(uCOcean, mix(uCLow,uCHigh,smoothstep(0.2,0.85,h)), 0.85);',
+'    float spot = smoothstep(0.78,0.9,vnoise(p*3.0+2.0));',
+'    col = mix(col, vec3(0.75,0.3,0.18), spot*0.8);',
+'  } else {',
+'    col = mix(uCLow,uCHigh,smoothstep(0.15,0.85,h));',
+'  }',
+'  if(uCraters>0.5){                         /* кратеры */',
+'    float c1 = smoothstep(0.6,0.86,vnoise(p*8.0))*smoothstep(0.3,0.6,vnoise(p*17.0));',
+'    col *= 1.0 - c1*0.4;',
+'  }',
+'  float lat = abs(vObj.y);                  /* полярные шапки */',
+'  float ice = smoothstep(uIce, uIce+0.09, lat + (h-0.5)*0.14);',
+'  col = mix(col, vec3(0.93,0.96,1.0), ice);',
+'  vec3 sunDir = normalize(-vWorld);         /* Солнце стоит в (0,0,0) */',
+'  vec3 N = normalize(vN);',
+'  float day = max(dot(N,sunDir),0.0);',
+'  float night = smoothstep(0.0,-0.25,dot(N,sunDir));',
+'  vec3 viewDir = normalize(cameraPosition - vWorld);',
+'  float spec = pow(max(dot(reflect(-sunDir,N),viewDir),0.0),90.0)*(1.0-land)*uOcean*day;',
+'  vec3 lit = col*(0.018 + day*1.25) + spec*vec3(1.0,0.95,0.85)*0.8;',
+'  float term = smoothstep(0.35,0.02,abs(dot(N,sunDir)))*day;   /* закатная кромка */',
+'  lit += term*vec3(0.55,0.22,0.05)*0.6;',
+'  if(uType>2.5){                            /* огни городов на ночной стороне */',
+'    float city = smoothstep(0.74,0.95,vnoise(vObj*34.0+uSeed))*land*(1.0-ice);',
+'    lit += vec3(1.0,0.8,0.45)*city*night*0.85;',
+'  }',
+'  gl_FragColor = vec4(lit,1.0);',
+'}'].join('\n');
+
+const CLOUD_FS = [
+'uniform float uSeed,uTime,uCover;',
+'varying vec3 vObj; varying vec3 vWorld; varying vec3 vN;',
+NOISE_GLSL, LOGF,
+'void main(){', LOGFEND,
+'  vec3 p = vObj*3.0 + vec3(uSeed + uTime*0.006);',
+'  float n = fbm(p)*0.7 + fbm(p*2.6+vec3(uTime*0.01))*0.3;',
+'  float a = smoothstep(uCover, uCover+0.25, n);',
+'  float day = max(dot(normalize(vN),normalize(-vWorld)),0.0);',
+'  gl_FragColor = vec4(vec3(1.0)*(0.03+day), a*0.85);',
+'}'].join('\n');
+
+const ATMO_FS = [
+'uniform vec3 uColor;',
+'varying vec3 vObj; varying vec3 vWorld; varying vec3 vN;',
+LOGF,
+'void main(){', LOGFEND,
+'  vec3 N = normalize(vN);',
+'  vec3 V = normalize(cameraPosition - vWorld);',
+'  float rim = pow(1.0 - max(dot(N,V),0.0), 2.6);        /* атмосферный ободок */',
+'  float day = max(dot(N,normalize(-vWorld)),0.0);',
+'  float term = smoothstep(0.5,0.0,abs(dot(N,normalize(-vWorld))));',
+'  gl_FragColor = vec4(uColor*(rim*(0.25+day*1.1)+term*rim*0.35), rim*(0.15+day*0.85));',
+'}'].join('\n');
+
+const SUN_FS = [
+'uniform float uTime;',
+'varying vec3 vObj; varying vec3 vWorld; varying vec3 vN;',
+NOISE_GLSL, LOGF,
+'void main(){', LOGFEND,
+'  vec3 p = vObj*5.0;',
+'  vec3 w = vec3(fbm(p+uTime*0.05), fbm(p+vec3(7.3-uTime*0.04)), fbm(p+vec3(3.1)));',
+'  float n  = fbm(p + w*2.2 + vec3(0.0,0.0,uTime*0.03));   /* бурление гранул */',
+'  float n2 = fbm(p*3.0 - w*1.4);',
+'  vec3 col = mix(vec3(1.0,0.45,0.08), vec3(1.0,0.85,0.35), smoothstep(0.3,0.7,n));',
+'  col = mix(col, vec3(1.0,0.98,0.9), smoothstep(0.62,0.95,n2));',
+'  float limb = pow(max(dot(normalize(vN),normalize(cameraPosition-vWorld)),0.0),0.55);',
+'  gl_FragColor = vec4(col*limb*2.4, 1.0);   /* яркость >1 — вспыхнет в блуме */',
+'}'].join('\n');
+
+const CORONA_FS = [
+'uniform float uTime;',
+'varying vec2 vUv;',
+NOISE_GLSL, LOGF,
+'void main(){', LOGFEND,
+'  vec2 c = vUv-0.5; float d = length(c)*2.0;',
+'  float ang = atan(c.y,c.x);',
+'  float rays = 0.55+0.45*vnoise(vec3(cos(ang)*3.0, sin(ang)*3.0, uTime*0.15));',
+'  float a = pow(max(1.0-d,0.0),2.2)*rays;',
+'  gl_FragColor = vec4(vec3(1.0,0.72,0.35)*a*1.6, a);',
+'}'].join('\n');
+
+const RING_FS = [
+'uniform float uSeed; uniform vec3 uPlanetPos; uniform float uPR;',
+'varying vec3 vLocal; varying vec3 vWorld; varying vec3 vN;',
+NOISE_GLSL, LOGF,
+'void main(){', LOGFEND,
+'  float r = (length(vLocal.xy)-1.4);              /* 0..1 внутри колец */',
+'  vec3 sd = normalize(-uPlanetPos);',
+'  vec3 rel = vWorld - uPlanetPos;',
+'  float behind = step(dot(rel,sd),0.0);           /* тень планеты на кольцах */',
+'  float perp = length(rel - sd*dot(rel,sd));',
+'  float shadow = behind*(1.0-smoothstep(uPR*0.95,uPR*1.25,perp));',
+'  float bands = 0.5+0.5*vnoise(vec3(r*44.0,uSeed,0.0));',
+'  float gap = smoothstep(0.02,0.06,abs(r-0.62));  /* «щель Кассини» */',
+'  float a = (0.25+0.75*bands)*gap*smoothstep(0.0,0.07,r)*smoothstep(1.0,0.9,r);',
+'  vec3 col = mix(vec3(0.9,0.82,0.65), vec3(0.65,0.6,0.52), bands);',
+'  float day = max(dot(normalize(vN),sd),0.0);',
+'  col *= (0.15+0.9*day)*(1.0-0.8*shadow);',
+'  gl_FragColor = vec4(col, a*0.9);',
+'}'].join('\n');
+
+const BILLBOARD_VS = [
+'varying vec2 vUv;', LOGV,
+'void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);', LOGVEND, ' }'].join('\n');
+
+const AST_VS = [
+'attribute vec4 iSeed;',
+'uniform float uTime;',
+'varying vec3 vN; varying vec3 vW; varying float vRnd;',
+LOGV,
+'mat3 rotAxis(vec3 ax, float a){',
+'  float s=sin(a),c=cos(a),t=1.0-c;',
+'  return mat3(t*ax.x*ax.x+c,      t*ax.x*ax.y-s*ax.z, t*ax.x*ax.z+s*ax.y,',
+'              t*ax.x*ax.y+s*ax.z, t*ax.y*ax.y+c,      t*ax.y*ax.z-s*ax.x,',
+'              t*ax.x*ax.z-s*ax.y, t*ax.y*ax.z+s*ax.x, t*ax.z*ax.z+c);',
+'}',
+'void main(){',
+'  vec3 ax = normalize(iSeed.xyz);',
+'  mat3 rm = rotAxis(ax, uTime*iSeed.w + iSeed.x*19.0);   /* своё вращение у каждого */',
+'  vRnd = fract(iSeed.y*7.31);',
+'  #ifdef USE_INSTANCING',
+'    vec4 wp = instanceMatrix*vec4(rm*position,1.0);',
+'    vN = normalize(mat3(instanceMatrix)*(rm*normal));',
+'  #else',
+'    vec4 wp = vec4(rm*position,1.0);',
+'    vN = normalize(rm*normal);',
+'  #endif',
+'  vW = wp.xyz;',
+'  wp = modelMatrix*wp;',
+'  gl_Position = projectionMatrix*viewMatrix*wp;',
+LOGVEND,
+'}'].join('\n');
+const AST_FS = [
+'varying vec3 vN; varying vec3 vW; varying float vRnd;',
+LOGF,
+'void main(){', LOGFEND,
+'  vec3 base = mix(vec3(0.32,0.28,0.24), vec3(0.5,0.45,0.4), vRnd);',
+'  float d = max(dot(normalize(vN),normalize(-vW)),0.0);',
+'  gl_FragColor = vec4(base*(0.05+1.15*d),1.0);',
+'}'].join('\n');
+
+const SOFTPTS_VS = [
+'attribute float aSize; attribute vec3 aColor;',
+'varying vec3 vColor;',
+LOGV,
+'void main(){',
+'  vColor = aColor;',
+'  gl_PointSize = aSize;',
+'  gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0);',
+LOGVEND,
+'}'].join('\n');
+const SOFTPTS_FS = [
+'varying vec3 vColor;',
+LOGF,
+'void main(){', LOGFEND,
+'  float d = length(gl_PointCoord-0.5);',
+'  float a = smoothstep(0.5,0.05,d);',
+'  if(a<0.02) discard;',
+'  gl_FragColor = vec4(vColor, a);',
+'}'].join('\n');
+
+const NEB_FS = [
+'uniform float uSeed,uIntensity; uniform vec3 uColor;',
+'varying vec2 vUv;',
+NOISE_GLSL, LOGF,
+'void main(){', LOGFEND,
+'  vec2 c = vUv-0.5;',
+'  float d = length(c)*2.0;',
+'  float n = fbm(vec3(c*3.5, uSeed));',
+'  float a = smoothstep(1.0,0.1,d)*pow(max(n-0.25,0.0)*1.6,1.7)*uIntensity;',
+'  gl_FragColor = vec4(uColor*a, a);',
+'}'].join('\n');
+
+const SIMPLE_VS = [
+'varying vec3 vN; varying vec3 vW;',
+LOGV,
+'void main(){',
+'  vN = normalize(mat3(modelMatrix)*normal);',
+'  vec4 wp = modelMatrix*vec4(position,1.0);',
+'  vW = wp.xyz;',
+'  gl_Position = projectionMatrix*viewMatrix*wp;',
+LOGVEND,
+'}'].join('\n');
+const SIMPLE_FS = [
+'uniform vec3 uColor; uniform float uEmit;',
+'varying vec3 vN; varying vec3 vW;',
+LOGF,
+'void main(){', LOGFEND,
+'  float d = max(dot(normalize(vN),normalize(-vW)),0.0);',
+'  gl_FragColor = vec4(uColor*(uEmit + 0.12 + 1.05*d),1.0);',
+'}'].join('\n');
+
+function planetMat(fs, uniforms, extra){
+  return new THREE.ShaderMaterial(Object.assign({uniforms:uniforms, vertexShader:PLANET_VS, fragmentShader:fs}, extra||{}));
+}
+function simpleMat(color, emit){
+  return new THREE.ShaderMaterial({uniforms:{uColor:{value:new THREE.Color(color)},uEmit:{value:emit||0}},
+    vertexShader:SIMPLE_VS, fragmentShader:SIMPLE_FS});
+}
+function softPtsMaterial(){
+  return new THREE.ShaderMaterial({vertexShader:SOFTPTS_VS, fragmentShader:SOFTPTS_FS,
+    transparent:true, blending:THREE.AdditiveBlending, depthWrite:false});
+}
+
+/* ---------- Звёздное небо: ~9000 звёзд спектральных классов ---------- */
+const starGroup = new THREE.Group(); scene.add(starGroup);
+{
+  const N = 9000;
+  const pos = new Float32Array(N*3), col = new Float32Array(N*3), sz = new Float32Array(N);
+  const R = 3.2e7;
+  const classes = [[0.68,0.78,1.0],[1.0,1.0,1.0],[1.0,0.93,0.75],[1.0,0.74,0.48],[1.0,0.52,0.38]]; // O/A,F,G,K,M
+  const weights = [];
+  [4,18,40,26,12].forEach(function(v,i){ for(let k=0;k<v;k++) weights.push(i); });
+  for(let i=0;i<N;i++){
+    const u = Math.random()*2-1, ph = Math.random()*Math.PI*2, s = Math.sqrt(1-u*u);
+    pos[i*3]=Math.cos(ph)*s*R; pos[i*3+1]=u*R; pos[i*3+2]=Math.sin(ph)*s*R;
+    const c = classes[weights[(Math.random()*100)|0]];
+    const b = 0.3 + Math.pow(Math.random(),2.5)*0.9;
+    col[i*3]=c[0]*b; col[i*3+1]=c[1]*b; col[i*3+2]=c[2]*b;
+    sz[i] = Math.random()<0.94 ? 1.2+Math.random()*1.6 : 3.0+Math.random()*3.2;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  g.setAttribute('aColor', new THREE.BufferAttribute(col,3));
+  g.setAttribute('aSize', new THREE.BufferAttribute(sz,1));
+  starGroup.add(new THREE.Points(g, softPtsMaterial()));
+}
+
+/* ---------- Туманности (процедурные билборды) ---------- */
+const nebGroup = new THREE.Group(); scene.add(nebGroup);
+{
+  const hues = [0x7a4fff, 0x2f6fff, 0xff4f8f, 0x2fe08f, 0xff8f2f];
+  for(let i=0;i<7;i++){
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1,1), new THREE.ShaderMaterial({
+      uniforms:{uSeed:{value:Math.random()*40}, uIntensity:{value:0.5+Math.random()*0.4}, uColor:{value:new THREE.Color(hues[i%hues.length])}},
+      vertexShader:BILLBOARD_VS, fragmentShader:NEB_FS,
+      transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide}));
+    const d = new THREE.Vector3(Math.random()*2-1, (Math.random()*2-1)*0.5, Math.random()*2-1).normalize().multiplyScalar(2.6e7);
+    m.position.copy(d); m.scale.setScalar((0.7+Math.random()*0.9)*1.6e7);
+    nebGroup.add(m);
+  }
+}
+
+/* ---------- Общий реестр небесных тел ---------- */
+const bodies = [];      // {key,name,rU,pos,mesh,orbit,parent,GM,info,...}
+const B = {};           // быстрый доступ по ключу
+const hitMeshes = [];   // меши для клика (raycasting)
+const orbitLines = [];
+
+function makeOrbitLine(aU, e, color){
+  const pts = []; const n = 180;
+  for(let i=0;i<n;i++){
+    const nu = i/n*Math.PI*2;
+    const r = aU*(1-e*e)/(1+e*Math.cos(nu));
+    pts.push(new THREE.Vector3(Math.cos(nu)*r, 0, Math.sin(nu)*r));
+  }
+  const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({color:color||0x30506e, transparent:true, opacity:0.5}));
+  scene.add(line); orbitLines.push(line);
+  return line;
+}
+
+/* ---------- Солнце: бурлящая поверхность + корона ---------- */
+{
+  const uni = {uTime:{value:0}};
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1,64,48), planetMat(SUN_FS, uni, {}));
+  const cUni = {uTime:{value:0}};
+  const corona = new THREE.Mesh(new THREE.PlaneGeometry(1,1), new THREE.ShaderMaterial({
+    uniforms:cUni, vertexShader:BILLBOARD_VS, fragmentShader:CORONA_FS,
+    transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide}));
+  scene.add(corona);
+  const body = {key:'sun', name:'Солнце', pos:new THREE.Vector3(), rU:696, mesh, corona, cUni, uni,
+    GM:GM.sun, isSun:true, orbit:null, isMoon:false, mapC:0xffcf66,
+    info:{title:'Солнце', type:'Звезда, жёлтый карлик G2V',
+      rows:{'Масса':'1,99·10³⁰ кг','Радиус':'696 000 км','Гравитация':'274 м/с²','Температура':'5505 °C (поверхность)','Возраст':'≈ 4,6 млрд лет'},
+      desc:SUN_DESC}};
+  B.sun = body; bodies.push(body); hitMeshes.push(mesh);
+}
+
+/* ---------- Планеты: процедурные поверхности, атмосферы, кольца ---------- */
+for(const p of PLANETS){
+  const rUnits0 = p.rKm/1000*S.planetScale;
+  const aU = p.a*AU;
+  const body = {key:p.key, name:p.name, aU, e:p.e, T:p.T*DAY, rotH:p.rot, phase:p.phase, elems:p,
+    rU:rUnits0, GM:GM[p.key], pos:new THREE.Vector3(), isMoon:false, mapC:p.mapC};
+  body.orbit = makeOrbitLine(aU, p.e);
+
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1,64,48), planetMat(PLANET_FS, {
+    uSeed:{value:p.seed}, uSea:{value:p.sea}, uIce:{value:p.ice}, uOcean:{value:p.ocean},
+    uCraters:{value:p.craters}, uType:{value:p.type}, uTime:{value:0},
+    uCLow:{value:new THREE.Color(p.cLow)}, uCHigh:{value:new THREE.Color(p.cHigh)},
+    uCOcean:{value:new THREE.Color(p.cOcean)}}));
+  mesh.scale.setScalar(rUnits0);
+  scene.add(mesh);
+  body.mesh = mesh;
+  body.info = {title:p.name,
+    type:({0:'Скалистая планета',1:'Газовый гигант',2:'Планета с плотной атмосферой',3:'Обитаемая скалистая планета'})[p.type],
+    rows:{'Масса':p.massKg,'Радиус':p.rKm.toLocaleString('ru-RU')+' км','Гравитация':p.g+' м/с²',
+          'Орб. период':fmtPeriod(p.T*DAY),'Орб. скорость':orbVelKms(p.a,p.T)+' км/с','Температура':p.temp},
+    desc:p.desc};
+
+  if(p.atmo){   // атмосфера с рассеиванием (голубое небо и закаты у Земли)
+    const atmo = new THREE.Mesh(new THREE.SphereGeometry(1.06,48,32), planetMat(ATMO_FS,
+      {uColor:{value:new THREE.Color(p.atmo)}}, {transparent:true, blending:THREE.AdditiveBlending, depthWrite:false}));
+    mesh.add(atmo);
+  }
+  if(p.key==='earth'){   // облака + северные сияния
+    const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.015,48,32), planetMat(CLOUD_FS,
+      {uSeed:{value:4.2}, uTime:{value:0}, uCover:{value:0.52}}, {transparent:true, depthWrite:false}));
+    mesh.add(clouds); body.clouds = clouds;
+    const am = new THREE.MeshBasicMaterial({color:0x4fff9f, transparent:true, opacity:0.5,
+      blending:THREE.AdditiveBlending, side:THREE.DoubleSide, depthWrite:false});
+    const aur1 = new THREE.Mesh(new THREE.RingGeometry(0.86,0.99,32,1), am);
+    aur1.rotation.x = Math.PI/2; aur1.position.y = 0.93; aur1.scale.setScalar(1.7);
+    mesh.add(aur1);
+    const aur2 = aur1.clone(); aur2.position.y = -0.93; mesh.add(aur2);
+  }
+  if(p.rings){   // кольца Сатурна с полосами, щелью Кассини и тенью планеты
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.4,2.4,160,4), new THREE.ShaderMaterial({
+      uniforms:{uSeed:{value:2.7}, uPlanetPos:{value:new THREE.Vector3()}, uPR:{value:rUnits0}},
+      vertexShader:`varying vec3 vLocal; varying vec3 vWorld; varying vec3 vN;
+        ${LOGV}
+        void main(){ vLocal=position; vN=normalize(mat3(modelMatrix)*vec3(0.0,1.0,0.0));
+        vec4 wp=modelMatrix*vec4(position,1.0); vWorld=wp.xyz;
+        gl_Position=projectionMatrix*viewMatrix*wp;
+        ${LOGVEND} }`,
+      fragmentShader:RING_FS, transparent:true, side:THREE.DoubleSide, depthWrite:false}));
+    ring.rotation.x = -Math.PI/2 + 0.47;
+    mesh.add(ring); body.ring = ring;
+  }
+  B[p.key]=body; bodies.push(body); hitMeshes.push(mesh);
+
+  /* крупные спутники этой планеты */
+  const list = MOONS[p.key]||[];
+  for(let i=0;i<list.length;i++){
+    const m = list[i];
+    const rM = Math.max(m.rKm/1000*S.planetScale, 2);
+    const dM = rUnits0*2.35 + i*rUnits0*1.15;   // расстояния увеличены для наглядности
+    const mm = new THREE.Mesh(new THREE.SphereGeometry(1,32,24), simpleMat(m.color, 0));
+    mm.scale.setScalar(rM); scene.add(mm);
+    const mOrbit = makeOrbitLine(dM/AU, 0, 0x24425c);
+    mOrbit.visible = false;
+    const mb = {key:p.key+'-'+m.name, name:m.name, parent:body, dU:dM, T:Math.abs(m.T)*DAY,
+      dir:(m.T<0?-1:1), rU:rM, mesh:mm, orbit:mOrbit, GM:GM[p.key]*0.05, isMoon:true,
+      mapC:m.color, pos:new THREE.Vector3(),
+      info:{title:m.name, type:'Спутник планеты '+p.name,
+        rows:{'Радиус':m.rKm.toLocaleString('ru-RU')+' км','Период обращения':fmtPeriod(Math.abs(m.T)*DAY),'Планета':p.name},
+        desc:m.desc}};
+    B[mb.key]=mb; bodies.push(mb); hitMeshes.push(mm);
+  }
+}
+
+/* ---------- Космическая станция на орбите Земли ---------- */
+{
+  const g = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.0,6.5,10), simpleMat(0x9fb4c8,0.12)); g.add(hull);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.1,0.26,10,28), simpleMat(0x7288a0,0.1));
+  ring.rotation.x = Math.PI/2; g.add(ring);
+  for(const sx of [-1,1]){
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(5,0.12,1.8), simpleMat(0x22448f,0.25));
+    panel.position.x = sx*4.4; g.add(panel);
+  }
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.35,8,8), simpleMat(0xff4040,2.0));
+  beacon.position.y = 1.5; g.add(beacon);
+  scene.add(g);
+  const hit = new THREE.Mesh(new THREE.SphereGeometry(1,8,8), new THREE.MeshBasicMaterial());
+  hit.material.visible = false; scene.add(hit);
+  const body = {key:'station', name:'Станция «Заря»', mesh:g, hit, parent:B.earth,
+    isStation:true, rU:18, GM:0, isMoon:false, pos:new THREE.Vector3(), orbit:null, mapC:0x7fd8ff,
+    info:{title:'Станция «Заря»', type:'Орбитальная станция',
+      rows:{'Экипаж':'6 человек','Орбита':'низкая околоземная','Сервис':'заправка корабля'},
+      desc:'Жилая и заправочная станция на орбите Земли. В режиме «2 — кинетический» подлетите ближе — топливо автоматически пополнится.'}};
+  B.station = body; bodies.push(body); hitMeshes.push(hit);
+}
+
+/* ---------- Пояс астероидов: тысячи вращающихся объектов (шейдер) ---------- */
+const asteroids = (()=>{
+  const N = 2400;
+  const geo = new THREE.IcosahedronGeometry(1, 1);
+  const mesh = new THREE.InstancedMesh(geo, new THREE.ShaderMaterial({
+    uniforms:{uTime:{value:0}}, vertexShader:AST_VS, fragmentShader:AST_FS}), N);
+  const M = new THREE.Matrix4(), q = new THREE.Quaternion(), pp = new THREE.Vector3(), sc = new THREE.Vector3(), eul = new THREE.Euler();
+  const seeds = new Float32Array(N*4);
+  for(let i=0;i<N;i++){
+    const r = (2.1 + Math.pow(Math.random(),0.7)*1.25)*AU;   // между Марсом и Юпитером
+    const a = Math.random()*Math.PI*2;
+    pp.set(Math.cos(a)*r, (Math.random()-0.5)*0.14*AU, Math.sin(a)*r);
+    const s = 1.5 + Math.pow(Math.random(),3)*10;
+    sc.set(s*(0.6+Math.random()*0.8), s*(0.6+Math.random()*0.8), s*(0.6+Math.random()*0.8));
+    eul.set(Math.random()*Math.PI, Math.random()*Math.PI, 0);
+    q.setFromEuler(eul);
+    M.compose(pp, q, sc);
+    mesh.setMatrixAt(i, M);
+    seeds[i*4]=Math.random()*2-1; seeds[i*4+1]=Math.random()*2-1; seeds[i*4+2]=Math.random()*2-1;
+    seeds[i*4+3]=0.1+Math.random()*0.9;
+  }
+  geo.setAttribute('iSeed', new THREE.InstancedBufferAttribute(seeds,4));
+  scene.add(mesh);
+  return mesh;
+})();
+
+/* ---------- Кометы с хвостами, направленными от Солнца ---------- */
+const comets = [];
+function addComet(name, aAU, e, phase){
+  const nuc = new THREE.Mesh(new THREE.SphereGeometry(1,12,10), simpleMat(0xdff4ff, 0.9));
+  nuc.scale.setScalar(2.5); scene.add(nuc);
+  const orbit = makeOrbitLine(aAU, e, 0x3a6a8f);
+  const NP = 260;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(NP*3),3));
+  g.setAttribute('aColor',   new THREE.BufferAttribute(new Float32Array(NP*3),3));
+  g.setAttribute('aSize',    new THREE.BufferAttribute(new Float32Array(NP),1));
+  const tail = new THREE.Points(g, softPtsMaterial());
+  tail.frustumCulled = false; scene.add(tail);
+  const body = {key:'comet-'+name, name, aU:aAU*AU, e, T:Math.sqrt(Math.pow(aAU,3))*365.25*DAY, phase,
+    mesh:nuc, tail, tailLen:NP, orbit:null, isComet:true, rU:3, GM:0, isMoon:false,
+    pos:new THREE.Vector3(), mapC:0x9fe8ff,
+    info:{title:name, type:'Комета',
+      rows:{'Эксцентриситет орбиты':String(e),'Период':fmtPeriod(Math.sqrt(Math.pow(aAU,3))*365.25*DAY),'Хвост':'всегда направлен от Солнца'},
+      desc:'Гостья из внешних пределов системы: лёд и пыль. Возле Солнца летучие вещества испаряются, и солнечный ветер сдувает их в длинный хвост.'}};
+  body.orbit = orbit;
+  B[body.key]=body; bodies.push(body); hitMeshes.push(nuc);
+  comets.push(body);
+}
+addComet('Комета Галерея', 6, 0.9, 1.0);
+addComet('Комета Веста', 12, 0.82, 4.2);
+
+/* ---------- Модель корабля (вид от первого лица, у камеры) ---------- */
+const shipModel = new THREE.Group();
+{
+  const hull = new THREE.Mesh(new THREE.ConeGeometry(0.8,3.2,10), simpleMat(0x8fa8bf,0.1));
+  hull.rotation.x = -Math.PI/2; shipModel.add(hull);
+  const glass = new THREE.Mesh(new THREE.SphereGeometry(0.34,10,8), simpleMat(0x66d8ff,0.85));
+  glass.position.set(0,0.42,0.2); shipModel.add(glass);
+  for(const sx of [-1,1]){
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.1,1.1), simpleMat(0x5a6f85,0.05));
+    wing.position.set(sx*1.25,-0.12,0.9); shipModel.add(wing);
+  }
+  const eng = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.45,0.7,8), simpleMat(0x404a56,0.1));
+  eng.rotation.x = Math.PI/2; eng.position.set(0,0,1.7); shipModel.add(eng);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.3,1.6,8), simpleMat(0xffa030,2.2));
+  flame.rotation.x = -Math.PI/2; flame.position.set(0,0,2.7); flame.visible = false;
+  shipModel.add(flame);
+  shipModel.userData.flame = flame;
+}
+shipModel.position.set(0,-1.35,-3.4);
+camera.add(shipModel);
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 4. ФИЗИКА
+   — положения тел решаются по Кеплеру от времени симуляции;
+   — корабль интегрирует ускорение от гравитации всех тел
+     (ньютоновская форма), может выйти на устойчивую орбиту.
+   ════════════════════════════════════════════════════════════ */
+function kepler(aU, e, T, t, phase){
+  const M  = 2*Math.PI*(((t/T)+phase)%1);
+  const nu = M + 2*e*Math.sin(M) + 1.25*e*e*Math.sin(2*M);
+  const r  = aU*(1-e*e)/(1+e*Math.cos(nu));
+  return {r, nu};
+}
+
+function updateBodies(){
+  const t = S.simTime;
+  const sunR = 696*S.planetScale;
+  B.sun.rU = sunR;
+  B.sun.mesh.scale.setScalar(sunR);
+  B.sun.corona.scale.setScalar(sunR*7);
+
+  for(const b of bodies){
+    if(b.isSun) continue;
+    if(b.isComet){
+      const k = kepler(b.aU, b.e, b.T, t, b.phase);
+      b.pos.set(Math.cos(k.nu)*k.r, 0, Math.sin(k.nu)*k.r);
+      b.mesh.position.copy(b.pos);
+      continue;
+    }
+    if(b.isStation){
+      const pp = b.parent.pos;
+      const ang = 2*Math.PI*((t/5400)%1);
+      const rr = b.parent.rU*3.4;
+      b.pos.set(pp.x+Math.cos(ang)*rr, pp.y+Math.sin(ang*0.7)*rr*0.18, pp.z+Math.sin(ang)*rr);
+      b.mesh.position.copy(b.pos);
+      b.mesh.rotation.y = ang;
+      b.mesh.scale.setScalar(Math.max(b.parent.rU/22, 1.5));
+      b.hit.position.copy(b.pos);
+      b.hit.scale.setScalar(Math.max(30, b.parent.rU*0.6));
+      continue;
+    }
+    if(b.parent){   // спутник
+      const pp = b.parent.pos;
+      const ang = 2*Math.PI*(((t/b.T))%1)*b.dir;
+      b.pos.set(pp.x+Math.cos(ang)*b.dU, pp.y, pp.z+Math.sin(ang)*b.dU);
+      b.mesh.position.copy(b.pos);
+      b.mesh.rotation.y = -ang;              // приливный захват
+      if(b.orbit) b.orbit.position.copy(pp);
+      continue;
+    }
+    // планета
+    const k = kepler(b.aU, b.e, b.T, t, b.phase);
+    b.pos.set(Math.cos(k.nu)*k.r, 0, Math.sin(k.nu)*k.r);
+    b.mesh.position.copy(b.pos);
+    b.mesh.rotation.y = 2*Math.PI*(((t/(b.rotH*3600)))%1);
+    if(b.ring){
+      b.ring.material.uniforms.uPlanetPos.value.copy(b.pos);
+      b.ring.material.uniforms.uPR.value = b.rU;
+    }
+  }
+}
+
+/* Ньютоновская гравитация в точке p (суммарное ускорение для корабля) */
+const gv = new THREE.Vector3();
+function gravityAt(p, out){
+  out.set(0,0,0);
+  if(S.gravScale<=0) return out;
+  for(const b of bodies){
+    if(!b.GM || b.isStation || b.isComet) continue;
+    gv.subVectors(b.pos, p);
+    const r = Math.max(gv.length(), b.rU*0.9);
+    out.addScaledVector(gv.normalize(), b.GM*S.gravScale/(r*r));
+  }
+  return out;
+}
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 5. КОРАБЛЬ И АВТОПИЛОТ
+   ════════════════════════════════════════════════════════════ */
+const ship = { pos:new THREE.Vector3(), vel:new THREE.Vector3(), quat:new THREE.Quaternion() };
+const AP = { active:false, target:null, phase:'', ang:0, rad:0, vcirc:0,
+  u:new THREE.Vector3(), v2:new THREE.Vector3() };
+
+const AX_X = new THREE.Vector3(1,0,0), AX_Y = new THREE.Vector3(0,1,0), AX_Z = new THREE.Vector3(0,0,1);
+const qq = new THREE.Quaternion();
+function pitch(a){ qq.setFromAxisAngle(AX_X,a); ship.quat.multiply(qq); }
+function yaw(a)  { qq.setFromAxisAngle(AX_Y,a); ship.quat.multiply(qq); }
+function roll(a) { qq.setFromAxisAngle(AX_Z,a); ship.quat.multiply(qq); }
+
+function thrustKeysDown(){
+  return keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']||keys['KeyR']||keys['KeyF']||keys['Space']||keys['ControlLeft'];
+}
+const boostK = ()=> (keys['ShiftLeft']||keys['ShiftRight']) ? 4 : 1;
+const tmpG = new THREE.Vector3();
+
+function updateShip(dt){
+  /* автопилот ведёт корабль сам; любая тяга — отмена */
+  if(AP.active){
+    if(thrustKeysDown()){ cancelAP(); }
+    else { updateAutopilot(dt); return; }
+  }
+  /* вращение клавишами */
+  const rot = 1.15*dt;
+  if(keys['ArrowUp'])    pitch(-rot);
+  if(keys['ArrowDown'])  pitch(+rot);
+  if(keys['ArrowLeft'])  yaw(+rot);
+  if(keys['ArrowRight']) yaw(-rot);
+  if(keys['KeyQ']) roll(+1.5*dt);
+  if(keys['KeyE']) roll(-1.5*dt);
+
+  /* тяга по локальным осям корабля */
+  const acc = new THREE.Vector3();
+  const base = 4.5*S.power*boostK();
+  if(keys['KeyW'])                       acc.z -= base;
+  if(keys['KeyS'])                       acc.z += base;
+  if(keys['KeyA'])                       acc.x -= base;
+  if(keys['KeyD'])                       acc.x += base;
+  if(keys['KeyR']||keys['Space'])        acc.y += base;
+  if(keys['KeyF']||keys['ControlLeft'])  acc.y -= base;
+  const thrusting = acc.lengthSq()>0;
+
+  /* режимы: 1 обычный / 2 кинетический (топливо) / 3 свободный */
+  if(thrusting && S.mode==='kinetic'){
+    if(S.fuel>0) S.fuel = Math.max(0, S.fuel - dt*2.2);
+    else acc.set(0,0,0);
+  }
+  acc.applyQuaternion(ship.quat);
+  if(S.mode!=='free'){
+    gravityAt(ship.pos, tmpG);
+    acc.add(tmpG);
+  }
+  /* дозаправка у станции */
+  if(S.mode==='kinetic' && S.fuel<100 && B.station &&
+     ship.pos.distanceTo(B.station.pos) < 120){
+    S.fuel = Math.min(100, S.fuel + dt*12);
+  }
+
+  ship.vel.addScaledVector(acc, dt);
+  ship.pos.addScaledVector(ship.vel, dt);
+  camera.position.copy(ship.pos);
+  camera.quaternion.copy(ship.quat);
+
+  S.lastThrust = thrusting ? (4.5*S.power*boostK()) : 0;
+  shipModel.userData.flame.visible = thrusting && (S.mode!=='kinetic' || S.fuel>0);
+}
+
+function setMode(m){
+  S.mode = m;
+  const names = {normal:'Обычный', kinetic:'Кинетический (топливо)', free:'Свободный (без гравитации и топлива)'};
+  el.modelbl.textContent = 'Режим: '+names[m];
+  toast('Режим: '+names[m]);
+}
+
+/* ---------- Автопилот: подлёт и выход на круговую орбиту ---------- */
+const apRel = new THREE.Vector3(), apDir = new THREE.Vector3(),
+      apTmp = new THREE.Vector3(), apLook = new THREE.Vector3();
+const lookM = new THREE.Matrix4(), qTarget = new THREE.Quaternion(), UP = new THREE.Vector3(0,1,0);
+function lookToward(point){
+  lookM.lookAt(ship.pos, point, UP);
+  qTarget.setFromRotationMatrix(lookM);
+  ship.quat.slerp(qTarget, 0.12);
+}
+function startAutopilot(target){
+  AP.active = true; AP.target = target; AP.phase = 'fly';
+  el.aplbl.style.display='block';
+  toast('Автопилот: курс на «'+target.name+'»');
+}
+function cancelAP(){
+  AP.active = false;
+  el.aplbl.style.display='none';
+  ship.vel.set(0,0,0);
+  toast('Автопилот отключён');
+}
+function updateAutopilot(dt){
+  const t = AP.target;
+  if(!t){ cancelAP(); return; }
+  apRel.subVectors(ship.pos, t.pos);
+  const dist = apRel.length();
+  const stopDist = Math.max(t.rU*4.2, t.rU+14);
+  if(AP.phase==='fly'){
+    if(dist <= stopDist){
+      AP.phase = 'orbit';
+      AP.rad = stopDist;
+      AP.u.copy(apRel).normalize();
+      apTmp.set(0,1,0);
+      apDir.crossVectors(AP.u, apTmp);
+      if(apDir.lengthSq()<0.05) apDir.set(0,0,1);
+      AP.v2.crossVectors(apDir.normalize(), AP.u).normalize();
+      AP.ang = 0;
+      const gsrc = t.isSun ? GM.sun : (t.parent ? GM[t.parent.key] : (t.GM||1));
+      AP.vcirc = Math.max(Math.sqrt(gsrc*S.gravScale/AP.rad), 0.8);
+      toast('Выход на круговую орбиту «'+t.name+'»');
+    } else {
+      const step = Math.min((dist-stopDist)*0.85, (14+dist*0.55)*dt*2.2);
+      apDir.copy(apRel).normalize();
+      ship.pos.addScaledVector(apDir, -step);
+      lookToward(t.pos);
+      ship.vel.set(0,0,0);
+    }
+  } else {   // строгое удержание круговой орбиты вокруг цели
+    AP.ang += (AP.vcirc/AP.rad)*dt;
+    apTmp.copy(AP.u).multiplyScalar(Math.cos(AP.ang)*AP.rad)
+         .addScaledVector(AP.v2, Math.sin(AP.ang)*AP.rad);
+    ship.pos.copy(t.pos).add(apTmp);
+    apLook.copy(AP.u).multiplyScalar(Math.cos(AP.ang+0.7)*AP.rad)
+          .addScaledVector(AP.v2, Math.sin(AP.ang+0.7)*AP.rad).add(t.pos);
+    lookToward(apLook);
+    ship.vel.set(0,0,0);
+  }
+  camera.position.copy(ship.pos);
+  camera.quaternion.copy(ship.quat);
+}
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 6. ВВОД: клавиатура, мышь, тач
+   ════════════════════════════════════════════════════════════ */
+const keys = {};
+addEventListener('keydown', e=>{
+  if(['F1','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Tab'].includes(e.code)) e.preventDefault();
+  if(!e.repeat) onKey(e.code);
+  keys[e.code] = true;
+});
+addEventListener('keyup', e=>{ keys[e.code] = false; });
+
+function onKey(code){
+  switch(code){
+    case 'KeyX': if(AP.active) cancelAP(); ship.vel.set(0,0,0); toast('Инерция погашена'); break;
+    case 'KeyP': togglePause(); break;
+    case 'KeyY': warpStep(+1); break;
+    case 'KeyT': warpStep(-1); break;
+    case 'KeyO': S.orbits=!S.orbits; applyOrbits(); break;
+    case 'KeyM': toggleMap(); break;
+    case 'KeyH': toggleHelp(); break;
+    case 'F1': toggleFullscreen(); break;
+    case 'Digit1': setMode('normal'); break;
+    case 'Digit2': setMode('kinetic'); break;
+    case 'Digit3': setMode('free'); break;
+    case 'KeyG':
+      if(S.selected) startAutopilot(B[S.selected]);
+      else toast('Сначала выберите объект (клик по нему или по карте)');
+      break;
+  }
+}
+
+/* --- мышь: осмотр перетаскиванием, клик — выбор, колесо — тяга --- */
+let dragging=false, mx=0, my=0, movedPx=0;
+const dom = renderer.domElement;
+dom.addEventListener('mousedown', e=>{ dragging=true; movedPx=0; mx=e.clientX; my=e.clientY; });
+addEventListener('mouseup', e=>{
+  if(dragging && movedPx<6) pickObject(e.clientX, e.clientY);
+  dragging=false;
+});
+addEventListener('mousemove', e=>{
+  if(dragging){
+    if(AP.active) return;
+    const dx=e.clientX-mx, dy=e.clientY-my; mx=e.clientX; my=e.clientY;
+    movedPx += Math.abs(dx)+Math.abs(dy);
+    yaw(-dx*0.0024); pitch(-dy*0.0024);
+  } else hoverObject(e.clientX, e.clientY);
+});
+dom.addEventListener('wheel', e=>{
+  e.preventDefault();
+  S.power = Math.min(500, Math.max(0.01, S.power*Math.exp(-e.deltaY*0.0013)));
+  $('set-power').textContent = S.power.toFixed(2)+'×';
+}, {passive:false});
+
+/* --- тач: перетаскивание — осмотр, щипок — изменение тяги --- */
+let tDist0=0, power0=1;
+dom.addEventListener('touchstart', e=>{
+  if(e.touches.length===2){
+    tDist0 = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    power0 = S.power;
+  } else { mx=e.touches[0].clientX; my=e.touches[0].clientY; movedPx=0; }
+}, {passive:true});
+dom.addEventListener('touchmove', e=>{
+  if(e.touches.length===2){
+    e.preventDefault();
+    const d = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    S.power = Math.min(500, Math.max(0.01, power0*(d/Math.max(tDist0,1))));
+    $('set-power').textContent = S.power.toFixed(2)+'×';
+  } else if(e.touches.length===1 && !AP.active){
+    e.preventDefault();
+    const t = e.touches[0];
+    const dx=t.clientX-mx, dy=t.clientY-my; mx=t.clientX; my=t.clientY;
+    movedPx += Math.abs(dx)+Math.abs(dy);
+    yaw(-dx*0.003); pitch(-dy*0.003);
+  }
+}, {passive:false});
+dom.addEventListener('touchend', e=>{
+  if(movedPx<8 && e.changedTouches.length===1)
+    pickObject(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+});
+
+/* --- выбор объекта кликом / подсветка при наведении --- */
+const raycaster = new THREE.Raycaster(), ptr = new THREE.Vector2();
+function intersectAt(x,y){
+  ptr.set(x/innerWidth*2-1, -(y/innerHeight)*2+1);
+  raycaster.setFromCamera(ptr, camera);
+  const hit = raycaster.intersectObjects(hitMeshes, false)[0];
+  if(!hit) return null;
+  for(const b of bodies){ if(b.mesh===hit.object) return b; }
+  for(const b of bodies){ if(b.hit===hit.object) return b; }
+  return null;
+}
+function pickObject(x,y){
+  const b = intersectAt(x,y);
+  if(b) selectBody(b.key); else closeInfo();
+}
+let hoverT = 0;
+function hoverObject(x,y){
+  const now = performance.now();
+  if(now-hoverT<120) return;
+  hoverT = now;
+  const b = intersectAt(x,y);
+  for(const m of markers) m.el.classList.toggle('hover', !!b && m.b.key===b.key);
+  dom.style.cursor = b ? 'pointer' : 'default';
+}
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 7. HUD И ИНТЕРФЕЙС
+   ════════════════════════════════════════════════════════════ */
+const $ = function(id){ return document.getElementById(id); };
+const el = {
+  speed:$('hud-speed'), alt:$('hud-alt'), near:$('hud-near'), time:$('hud-time'),
+  warp:$('hud-warp'), fps:$('fps'), help:$('help'), mapwrap:$('mapwrap'), mapc:$('map'),
+  info:$('infopanel'), settings:$('settings'), toast:$('toast'),
+  shipstate:$('shipstate'), fuelbar:$('fuelbar'), modelbl:$('modelbl'), aplbl:$('aplbl'),
+};
+
+function toast(t){
+  el.toast.textContent = t; el.toast.style.opacity = 1;
+  clearTimeout(toast._h); toast._h = setTimeout(()=>el.toast.style.opacity=0, 2200);
+}
+function fmtSpeed(uPerS){
+  const kms = uPerS*1000;                       // 1 ед = 1000 км
+  if(S.unit==='c'){
+    const c = kms/C_KMS;
+    return c>=0.0005 ? c.toFixed(2)+' c' : kms.toFixed(1)+' км/с';
+  }
+  if(S.unit==='kmh') return Math.round(kms*3600).toLocaleString('ru-RU')+' км/ч';
+  if(kms>2000) return (kms/1000).toFixed(1)+' тыс. км/с';
+  return kms.toLocaleString('ru-RU',{maximumFractionDigits:1})+' км/с';
+}
+function fmtDist(u){
+  const km = u*1000;
+  if(km<1e5)   return km.toFixed(0)+' км';
+  if(km<1.5e7) return (km/1e6).toFixed(2)+' млн км';
+  return (km/1.496e8).toFixed(2)+' а.е.';
+}
+function nearestBody(){
+  let best=null, bd=Infinity;
+  for(const b of bodies){
+    const d = b.pos.distanceTo(ship.pos)-b.rU;
+    if(d<bd){ bd=d; best=b; }
+  }
+  return {b:best, d:Math.max(bd,0)};
+}
+
+/* ---------- маркеры объектов: видны издалека, всегда кликабельны ---------- */
+const markers = [];
+function initMarkers(){
+  for(const b of bodies){
+    const div = document.createElement('div');
+    div.className = 'marker';
+    div.innerHTML = '<span style="color:var(--accent)">◆</span> '+b.name;
+    div.addEventListener('click', ev=>{ ev.stopPropagation(); selectBody(b.key); });
+    document.body.appendChild(div);
+    markers.push({b, el:div});
+  }
+}
+
+/* ---------- выбор объекта и панель информации ---------- */
+function selectBody(key){
+  S.selected = key;
+  const b = B[key];
+  $('info-name').textContent = b.info.title;
+  $('info-type').textContent = b.info.type;
+  $('info-table').innerHTML = Object.entries(b.info.rows)
+    .map(([k,v])=>'<tr><td>'+k+'</td><td>'+v+'</td></tr>').join('');
+  $('info-desc').textContent = b.info.desc;
+  const orbRow = $('info-orbit-row');
+  if(b.orbit){ orbRow.style.display='flex'; $('info-orbit').checked = b.orbit.visible; }
+  else orbRow.style.display='none';
+  el.info.classList.add('open');
+  for(const m of markers) m.el.classList.toggle('sel', m.b.key===key);
+}
+function closeInfo(){
+  el.info.classList.remove('open');
+  S.selected = null;
+  for(const m of markers) m.el.classList.remove('sel');
+}
+$('info-close').onclick = closeInfo;
+$('info-fly').onclick   = ()=>{ if(S.selected) startAutopilot(B[S.selected]); closeInfo(); };
+$('info-orbit').onchange = e=>{
+  const b = B[S.selected];
+  if(b && b.orbit) b.orbit.visible = e.target.checked;
+};
+
+/* ---------- обновление HUD ---------- */
+let fpsAcc=0, fpsN=0;
+function updateHUD(dt){
+  el.speed.textContent = fmtSpeed(ship.vel.length());
+  const nb = nearestBody();
+  el.alt.textContent  = nb.b ? fmtDist(nb.d) : '—';
+  el.near.textContent = nb.b ? nb.b.name+' · '+fmtDist(nb.d) : '—';
+  const d = new Date(S.startEpoch + S.simTime*1000);
+  el.time.textContent = d.toLocaleDateString('ru-RU')+' '+d.toLocaleTimeString('ru-RU');
+  el.warp.textContent = S.paused ? '⏸ пауза' : '×'+WARPS[S.warpIdx].toLocaleString('ru-RU');
+  fpsAcc+=dt; fpsN++;
+  if(fpsAcc>=0.5){
+    el.fps.textContent = 'FPS: '+Math.round(fpsN/fpsAcc);
+    fpsAcc=0; fpsN=0;
+  }
+  if(S.mode==='kinetic'){
+    el.shipstate.classList.add('open');
+    el.fuelbar.style.width = S.fuel+'%';
+  } else el.shipstate.classList.remove('open');
+
+  for(const m of markers){
+    const b = m.b;
+    const dist = b.pos.distanceTo(camera.position);
+    tmpG.copy(b.pos).project(camera);
+    if(tmpG.z>1 || dist < b.rU*3){ m.el.style.display='none'; continue; }
+    m.el.style.display='block';
+    m.el.style.left = ((tmpG.x*0.5+0.5)*innerWidth)+'px';
+    m.el.style.top  = ((-tmpG.y*0.5+0.5)*innerHeight)+'px';
+    m.el.style.opacity = Math.max(0.15, Math.min(1, 1.45 - dist/1.6e7)).toFixed(2);
+  }
+}
+
+/* ---------- карта системы (кликабельная мини-карта) ---------- */
+const mapCtx = el.mapc.getContext('2d');
+let mapT = 0;
+function drawMap(){
+  const w = el.mapc.width, h = el.mapc.height, cx=w/2, cy=h/2;
+  const sc = rAU => Math.pow(Math.max(rAU,0)/31, 0.55)*(w/2-12);
+  mapCtx.clearRect(0,0,w,h);
+  mapCtx.fillStyle='#050b16'; mapCtx.fillRect(0,0,w,h);
+  for(const b of bodies){
+    if(b.isSun || b.isMoon || b.isStation || !b.aU) continue;
+    mapCtx.strokeStyle='rgba(80,140,200,0.3)';
+    mapCtx.beginPath(); mapCtx.arc(cx,cy,sc(b.aU/AU),0,7); mapCtx.stroke();
+  }
+  mapCtx.fillStyle='#ffd066';
+  mapCtx.beginPath(); mapCtx.arc(cx,cy,5,0,7); mapCtx.fill();
+  mapCtx.font='10px sans-serif'; mapCtx.fillText('Солнце',cx+8,cy+3);
+  for(const b of bodies){
+    if(b.isSun || b.isMoon) continue;
+    const r = b.pos.length()/AU, a = Math.atan2(b.pos.z, b.pos.x);
+    const px = cx+Math.cos(a)*sc(r), py = cy+Math.sin(a)*sc(r);
+    mapCtx.fillStyle = '#'+new THREE.Color(b.mapC||0xcccccc).getHexString();
+    mapCtx.beginPath(); mapCtx.arc(px,py, b.key===S.selected?6:4, 0, 7); mapCtx.fill();
+    mapCtx.fillStyle='rgba(190,225,255,0.85)';
+    mapCtx.fillText(b.name, px+6, py+3);
+    b._mapPx = [px,py];
+  }
+}
+el.mapc.addEventListener('click', e=>{
+  const rect = el.mapc.getBoundingClientRect();
+  const mxp=(e.clientX-rect.left)/rect.width*el.mapc.width;
+  const myp=(e.clientY-rect.top)/rect.height*el.mapc.height;
+  let best=null, bd=1e9;
+  for(const b of bodies){
+    if(!b._mapPx || b.isMoon) continue;
+    const d = Math.hypot(b._mapPx[0]-mxp, b._mapPx[1]-myp);
+    if(d<bd){ bd=d; best=b; }
+  }
+  if(best && bd<30){ selectBody(best.key); toast('«'+best.name+'» выбран — кнопка 🚀 или клавиша G для автопилота'); }
+});
+$('mapcap').addEventListener('click', ()=>{
+  const big = el.mapc.width < 500;
+  el.mapc.width = el.mapc.height = big ? 560 : 300;
+});
+
+/* ---------- время, пауза, орбиты, режимы ---------- */
+function warpStep(dir){
+  S.paused = false;
+  S.warpIdx = Math.min(WARPS.length-1, Math.max(1, S.warpIdx+dir));
+  toast('Время: ×'+WARPS[S.warpIdx].toLocaleString('ru-RU'));
+}
+function togglePause(){
+  S.paused = !S.paused;
+  toast(S.paused ? 'Пауза' : 'Время пошло');
+  $('btn-pause').classList.toggle('on', S.paused);
+}
+function applyOrbits(){
+  for(const b of bodies){
+    if(!b.orbit) continue;
+    if(b.isMoon)
+      b.orbit.visible = S.orbits && camera.position.distanceTo(b.pos) < b.parent.rU*40;
+    else
+      b.orbit.visible = S.orbits;
+  }
+  $('btn-orbits').classList.toggle('on', S.orbits);
+}
+function toggleMap(){ el.mapwrap.classList.toggle('open'); }
+function toggleHelp(){
+  el.help.classList.toggle('hidden');
+  $('btn-help').classList.toggle('on', !el.help.classList.contains('hidden'));
+}
+function toggleFullscreen(){
+  if(document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen().catch(()=>{});
+}
+
+/* ---------- кнопки нижней панели ---------- */
+$('btn-stop').onclick     = ()=>{ if(AP.active) cancelAP(); ship.vel.set(0,0,0); toast('Стоп: скорость погашена'); };
+$('btn-pause').onclick    = togglePause;
+$('btn-slow').onclick     = ()=>warpStep(-1);
+$('btn-fast').onclick     = ()=>warpStep(+1);
+$('btn-now').onclick      = ()=>{ S.simTime=0; S.startEpoch=Date.now(); S.warpIdx=1; S.paused=false; toast('Дата симуляции: текущий момент'); };
+$('btn-orbits').onclick   = ()=>{ S.orbits=!S.orbits; applyOrbits(); };
+$('btn-map').onclick      = toggleMap;
+$('btn-help').onclick     = toggleHelp;
+$('btn-fs').onclick       = toggleFullscreen;
+$('btn-settings').onclick = ()=> el.settings.classList.toggle('open');
+$('btn-reset').onclick    = ()=>{ localStorage.removeItem('seb_save'); localStorage.removeItem('seb_settings'); location.reload(); };
+
+/* ---------- переключатель единиц скорости ---------- */
+for(const btn of document.querySelectorAll('#unit-switch button')){
+  btn.onclick = ()=>{
+    S.unit = btn.dataset.u;
+    document.querySelectorAll('#unit-switch button').forEach(b=>b.classList.toggle('on', b===btn));
+  };
+}
+
+/* ---------- настройки ---------- */
+function applyQuality(q){
+  S.quality = q;
+  if(q==='low'){ renderer.setPixelRatio(0.7); bloom.enabled=false; asteroids.count=900; }
+  else if(q==='med'){ renderer.setPixelRatio(Math.min(devicePixelRatio,1.25)); bloom.enabled=true; asteroids.count=1600; }
+  else { renderer.setPixelRatio(Math.min(devicePixelRatio,2)); bloom.enabled=true; asteroids.count=2400; }
+}
+$('set-quality').onchange = e=> applyQuality(e.target.value);
+$('set-bloom').onchange   = e=> bloom.enabled = e.target.checked;
+$('set-nebula').onchange  = e=> nebGroup.visible = e.target.checked;
+$('set-stars').onchange   = e=> starGroup.visible = e.target.checked;
+$('set-sound').onchange   = e=> setSoundOn(e.target.checked);
+$('btn-sound').onclick    = ()=>{ setSoundOn(!S.sound); $('set-sound').checked = S.sound; };
+$('set-pscale').oninput   = e=>{
+  S.planetScale = +e.target.value;
+  $('set-pscale-v').textContent = S.planetScale;
+  for(const b of bodies){
+    if(b.isSun || b.isStation || b.isComet || b.isMoon) continue;
+    b.rU = b.elems.rKm/1000*S.planetScale;
+    b.mesh.scale.setScalar(b.rU);
+  }
+};
+$('set-grav').oninput = e=>{ S.gravScale=+e.target.value; $('set-grav-v').textContent=S.gravScale.toFixed(1); };
+$('set-save').onclick = ()=>{ saveAll(); toast('Позиция и настройки сохранены в localStorage'); };
+function setSoundOn(on){
+  S.sound = on;
+  if(masterG) masterG.gain.value = on ? 0.9 : 0;
+  $('btn-sound').classList.toggle('on', on);
+  $('btn-sound').textContent = on ? 'Звук 🔊' : 'Звук 🔇';
+}
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 8. ЗВУК (WebAudio, без внешних файлов)
+   ════════════════════════════════════════════════════════════ */
+let AC=null, masterG=null, humG=null, humO1=null, humO2=null;
+function initAudio(){
+  AC = new (window.AudioContext||window.webkitAudioContext)();
+  masterG = AC.createGain(); masterG.gain.value = 0.9; masterG.connect(AC.destination);
+  humG = AC.createGain(); humG.gain.value=0; humG.connect(masterG);
+  humO1 = AC.createOscillator(); humO1.type='sawtooth'; humO1.frequency.value=46;
+  humO2 = AC.createOscillator(); humO2.type='square';   humO2.frequency.value=92;
+  const humF = AC.createBiquadFilter(); humF.type='lowpass'; humF.frequency.value=300;
+  humO1.connect(humF); humO2.connect(humF); humF.connect(humG);
+  humO1.start(); humO2.start();
+  /* эмбиент: низкий дрон + приглушённый шум */
+  const ambG = AC.createGain(); ambG.gain.value=0.05; ambG.connect(masterG);
+  const a1=AC.createOscillator(); a1.frequency.value=48;   a1.type='sine';
+  const a2=AC.createOscillator(); a2.frequency.value=50.7; a2.type='sine';
+  const aG=AC.createGain(); aG.gain.value=0.4;
+  a1.connect(aG); a2.connect(aG); aG.connect(ambG); a1.start(); a2.start();
+  const buf = AC.createBuffer(1, AC.sampleRate*2, AC.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<data.length;i++) data[i]=Math.random()*2-1;
+  const noise = AC.createBufferSource(); noise.buffer=buf; noise.loop=true;
+  const nF = AC.createBiquadFilter(); nF.type='lowpass'; nF.frequency.value=140;
+  const nG = AC.createGain(); nG.gain.value=0.3;
+  noise.connect(nF); nF.connect(nG); nG.connect(ambG); noise.start();
+}
+function updateAudio(){
+  if(!AC) return;
+  const t = S.lastThrust;
+  humG.gain.value = Math.min(0.09, (t/18)*0.09);   // громкость ~ ускорению
+  humO1.frequency.value = 46 + t*1.4;
+  humO2.frequency.value = 92 + t*2.8;
+}
+
+/* ════════════════════════════════════════════════════════════
+   СЕКЦИЯ 9. СОХРАНЕНИЕ, ЗАГРУЗКА, ГЛАВНЫЙ ЦИКЛ
+   ════════════════════════════════════════════════════════════ */
+function saveAll(){
+  try{
+    localStorage.setItem('seb_save', JSON.stringify({
+      p:ship.pos.toArray(), q:ship.quat.toArray(), v:ship.vel.toArray(),
+      st:S.simTime, ep:S.startEpoch, pw:S.power, wi:S.warpIdx,
+      mode:S.mode, fuel:S.fuel,
+      set:{ps:S.planetScale, g:S.gravScale, q:S.quality, u:S.unit}
+    }));
+  }catch(e){}
+}
+function loadAll(){
+  try{
+    const raw = localStorage.getItem('seb_save'); if(!raw) return false;
+    const s = JSON.parse(raw);
+    ship.pos.fromArray(s.p); ship.quat.fromArray(s.q); ship.vel.fromArray(s.v);
+    S.simTime=s.st; S.startEpoch=s.ep; S.power=s.pw||1;
+    S.warpIdx=Math.min(WARPS.length-1, Math.max(1, s.wi||1));
+    S.mode=s.mode||'normal'; S.fuel=(s.fuel!=null)?s.fuel:100;
+    if(s.set){
+      S.planetScale=s.set.ps; S.gravScale=s.set.g;
+      $('set-pscale').value=s.set.ps; $('set-pscale-v').textContent=s.set.ps;
+      $('set-grav').value=s.set.g; $('set-grav-v').textContent=(+s.set.g).toFixed(1);
+      if(s.set.q){ $('set-quality').value=s.set.q; applyQuality(s.set.q); }
+      if(s.set.u){ S.unit=s.set.u;
+        document.querySelectorAll('#unit-switch button').forEach(b=>b.classList.toggle('on', b.dataset.u===s.set.u)); }
+    }
+    return true;
+  }catch(e){ return false; }
+}
+addEventListener('beforeunload', saveAll);
+setInterval(saveAll, 10000);
+
+/* ---------- запуск после экрана загрузки ---------- */
+$('loadstatus').textContent = 'Движок готов. Управление — в таблице выше.';
+$('startbtn').onclick = ()=>{
+  const restored = loadAll();
+  initAudio();
+  setSoundOn(S.sound);
+  updateBodies();
+  initMarkers();
+  applyOrbits();
+  setMode(S.mode);
+  if(!restored){
+    const e0 = B.earth.pos;
+    ship.pos.set(e0.x+700, e0.y+180, e0.z+700);
+    lookM.lookAt(ship.pos, e0, UP);
+    ship.quat.setFromRotationMatrix(lookM);
+    S.simTime = 0; S.startEpoch = Date.now();
+  }
+  camera.position.copy(ship.pos);
+  camera.quaternion.copy(ship.quat);
+  $('loading').style.display='none';
+  clock.getDelta();
+  animating = false;
+  toast(restored ? 'Позиция восстановлена из сохранения' : 'Добро пожаловать! Кликните планету или откройте карту (M)');
+  animate();
+};
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+/* ---------- хвосты комет (частицы, направленные от Солнца) ---------- */
+const tailDir = new THREE.Vector3(), tailPerp = new THREE.Vector3();
+function updateCometTails(){
+  for(const c of comets){
+    tailDir.copy(c.pos).normalize();
+    tailPerp.set(tailDir.z, 0, -tailDir.x);
+    const act = Math.min(1, (7*AU)/Math.max(c.pos.length(),1));   // активность у Солнца
+    const L = 30 + 240*act;
+    const pos = c.tail.geometry.attributes.position.array;
+    const col = c.tail.geometry.attributes.aColor.array;
+    const sz  = c.tail.geometry.attributes.aSize.array;
+    for(let i=0;i<c.tailLen;i++){
+      const k = i/c.tailLen;
+      const spread = k*26*act + 0.5;
+      const rnd = i*3.7;
+      pos[i*3]   = c.pos.x + tailDir.x*k*L + tailPerp.x*Math.sin(rnd)*spread;
+      pos[i*3+1] = c.pos.y + tailDir.y*k*L + Math.sin(rnd*1.3)*spread;
+      pos[i*3+2] = c.pos.z + tailDir.z*k*L + tailPerp.z*Math.cos(rnd)*spread;
+      const a = (1-k)*act;
+      col[i*3]=0.6+0.4*a; col[i*3+1]=0.25+0.75*a; col[i*3+2]=a;
+      sz[i] = (1-k)*7*act + 1.2;
+    }
+    c.tail.geometry.attributes.position.needsUpdate = true;
+    c.tail.geometry.attributes.aColor.needsUpdate = true;
+    c.tail.geometry.attributes.aSize.needsUpdate = true;
+  }
+}
+
+/* ---------- главный цикл ---------- */
+const clock = new THREE.Clock();
+let animating = false;
+let orbitCheckT = 0;
+function animate(){
+  if(animating) return;
+  animating = true;
+  const loop = ()=>{
+    requestAnimationFrame(loop);
+    const dt = Math.min(clock.getDelta(), 0.05);   // ограничение delta-time
+    if(!S.paused) S.simTime += dt*WARPS[S.warpIdx];
+    updateBodies();
+    updateShip(dt);
+    updateHUD(dt);
+    updateCometTails();
+    /* билборды и униформы шейдеров */
+    for(const b of bodies){
+      if(b.uni)  b.uni.uTime.value  = S.simTime;
+      if(b.cUni) b.cUni.uTime.value = S.simTime;
+      if(b.clouds) b.clouds.material.uniforms.uTime.value = S.simTime;
+      if(b.corona) b.corona.quaternion.copy(camera.quaternion);
+    }
+    nebGroup.children.forEach(n=>n.quaternion.copy(camera.quaternion));
+    asteroids.material.uniforms.uTime.value = S.simTime;
+    orbitCheckT += dt;
+    if(orbitCheckT>1){ orbitCheckT=0; applyOrbits(); }
+    updateAudio();
+    mapT += dt;
+    if(el.mapwrap.classList.contains('open') && mapT>0.12){ mapT=0; drawMap(); }
+    composer.render();
+  };
+  loop();
+}
+
+/* Первичная инициализация (до старта) — чтобы HUD и карта имели данные */
+updateBodies();
+camera.position.set(700, 200, 700);
+camera.lookAt(0,0,0);
+</script>
+</body>
+</html>
